@@ -1,0 +1,8 @@
+attendance/
+model/enrollments.npz
+__pycache__/
+*.pyc
+.venv/
+
+# Keep the ONNX models? They are large (~37 MB). Uncomment to ignore them:
+# model/*.onnx

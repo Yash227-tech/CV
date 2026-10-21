@@ -1,0 +1,208 @@
+# Face Recognition Attendance (Prototype)
+
+A computer-vision attendance system built with **Python + OpenCV** that works
+from a **single photo per student**. It enrolls each student from one image,
+then marks attendance automatically into a daily CSV file.
+
+Because only one sample per person is available, this uses **deep face
+embeddings** instead of a classifier that needs many samples:
+
+- **YuNet** — a fast CNN face *detector*
+- **SFace** — a face *recognizer* that turns each face into a 128-number
+  "fingerprint" (embedding)
+
+Recognition is then just **comparing fingerprints**: the live face is matched to
+whichever enrolled student it is most similar to (cosine similarity). No
+per-student training is required, so one photo is enough.
+
+Both models ship as small ONNX files from the OpenCV Zoo and run through
+`opencv-contrib-python` — **no dlib / CMake / Visual Studio** setup.
+
+## How it works
+
+```
+Image / Webcam ──► Detect face (YuNet) ──► Embed face (SFace) ──► 128-d vector
+                                                                      │
+Enroll:   store the vector as the student's reference  ◄──────────────┤
+Attend:   compare live vector to all references (cosine) ─────────────┘
+          best match ≥ threshold  ──►  mark present in daily CSV
+```
+
+| Script | What it does |
+|--------|--------------|
+| `gui.py` | **Graphical interface** (Tkinter) for everything below |
+| `enroll.py` | Enroll students from a single photo each (file, folder, or webcam snapshot) |
+| `attendance.py` | Recognize faces live, or mark manually; writes per-subject CSVs |
+| `report.py` | Per-student attendance %, per subject; CSV export |
+| `main.py` | Command-line menu that runs everything |
+| `face_engine.py` | Shared detect + embed helper |
+| `store.py` | Loads/saves the enrolled embeddings (`model/enrollments.npz`) |
+| `config.py` | Paths and settings |
+
+### Features
+
+- **Single-photo enrollment** (deep embeddings — no 50-sample capture, no training)
+- **Multiple subjects** — attendance is tracked separately per subject
+- **Face attendance** — automatic recognition from the webcam
+- **Manual attendance** — mark a student present without the camera (each row is
+  tagged `face` or `manual`)
+- **Graphical UI** (Tkinter) and a command-line menu
+
+## Setup
+
+Requires Python 3.8+ and a webcam.
+
+```bash
+pip install -r requirements.txt
+```
+
+**Model files** (already downloaded into `model/`): if you ever need them again,
+get these from the OpenCV Zoo and place them in `model/`:
+
+- `face_detection_yunet_2023mar.onnx`
+- `face_recognition_sface_2021dec.onnx`
+
+## Usage
+
+### Graphical interface (easiest)
+
+```bash
+python gui.py
+```
+
+A tabbed desktop app:
+
+- **Students** — enroll (image / webcam / folder) via inline ID/Name fields,
+  add another photo, delete, all shown in a table.
+- **Attendance** — pick a subject **once** from a dropdown (saved for next
+  time), then "Start Face Attendance" or mark students manually; a live list
+  shows who's present today for that subject.
+- **Reports** — per-student attendance % per subject, with CSV export.
+
+### Command-line menu
+
+```bash
+python main.py
+```
+
+### Or run each step directly
+
+**1. Enroll students (one photo each):**
+
+```bash
+# From a single image file
+python enroll.py --image photos/alice.jpg --id 101 --name "Alice"
+
+# From a folder of photos named "<id>_<name>.jpg"  (e.g. 101_Alice.jpg)
+python enroll.py --dir photos
+
+# From a webcam snapshot (press SPACE to capture)
+python enroll.py --webcam --id 101 --name "Alice"
+
+# List enrolled students, or delete one
+python enroll.py --list
+python enroll.py --delete 101
+```
+
+> Re-enrolling an existing ID updates that student's face. To remove a student
+> entirely, use `--delete` (CLI), the "List / delete enrolled students" menu
+> option, or the "Manage / delete students" button in the GUI.
+
+### Improving accuracy (multiple reference photos)
+
+A student can have **several reference photos**, and a face is matched to the
+**best** one. This fixes appearance changes that a single photo can't cover —
+most commonly **wearing spectacles at enrollment but not at attendance** (or
+vice versa). Add a second photo of the student in the other state:
+
+```bash
+# Add an extra reference (does NOT replace the existing photo)
+python enroll.py --image photos/alice_no_glasses.jpg --id 101 --append
+python enroll.py --webcam --id 101 --append
+```
+
+In the GUI use **"Add another photo (e.g. no glasses)"**; in the CLI menu use
+option **4**. Each enrollment also auto-stores a horizontally-flipped version
+(`USE_FLIP_AUGMENT` in `config.py`) for extra pose robustness.
+
+If a known student still reads as "Unknown", lower `COSINE_THRESHOLD` slightly
+(e.g. 0.33) and/or add a reference photo taken in the attendance lighting.
+
+**2. Take attendance for a subject (face):**
+
+```bash
+python attendance.py --subject Maths        # press q to stop
+```
+
+**3. Reports:**
+
+```bash
+python report.py                       # all subjects
+python report.py --subject Maths       # one subject
+python report.py --subject Maths --date 2026-10-21   # one day
+python report.py --subject Maths --export            # write summary.csv
+```
+
+During webcam use a window opens — press **`q`** to quit (SPACE to capture in
+`--webcam` enroll).
+
+## Output
+
+Attendance is saved per subject, per day, e.g.
+`attendance/Maths/Maths_2026-10-21.csv`:
+
+```csv
+id,name,date,time,method
+101,Alice,2026-10-21,09:14:02,face
+102,Bob,2026-10-21,09:14:05,manual
+```
+
+Each student is marked **present only once per subject per day**. The `method`
+column records whether the mark came from face recognition or a manual entry.
+
+## Tuning (`config.py`)
+
+- `CAMERA_INDEX` — change if the wrong camera opens (try `1`, `2`, ...).
+- `COSINE_THRESHOLD` — similarity needed to accept a match (higher = match),
+  default **0.363** (OpenCV's recommended value for SFace). Raise it to be
+  stricter about "Unknown", lower it to be more lenient.
+- `DET_SCORE_THRESH` — minimum face-detection confidence.
+- `DET_MAX_SIDE` — big photos are downscaled to this longer-side size before
+  detection (YuNet can miss faces in very high-res images).
+
+## Why this instead of "collect 50 samples + LBPH"?
+
+LBPH (and most classical classifiers) need **many** samples per person and
+degrade badly with one. Deep embeddings are trained on millions of faces, so a
+**single** reference photo already gives a strong, discriminative fingerprint —
+exactly the one-shot setting here. In testing, a student enrolled from one photo
+was correctly recognised in a *different* photo with a clear margin over other
+people.
+
+## Notes & limitations (useful for a report)
+
+- Enroll with a **clear, well-lit, roughly frontal** photo for best results.
+- No **liveness / anti-spoofing** — a photo on a phone could fool it. A real
+  deployment would add liveness detection.
+- Very low-contrast or heavily stylised images (e.g. old prints) may fail
+  detection.
+- Accuracy still depends on lighting, pose, and camera quality at attendance
+  time.
+
+## Project layout
+
+```
+Mini/
+├── config.py
+├── face_engine.py       # detect (YuNet) + embed (SFace)
+├── store.py             # enrolled embeddings storage
+├── enroll.py            # single-photo enrollment
+├── attendance.py        # recognize + mark attendance (per subject, + manual)
+├── report.py            # per-student attendance %, export
+├── gui.py               # Tkinter graphical interface
+├── main.py              # command-line menu
+├── requirements.txt
+├── model/               # ONNX models + enrollments.npz (created on enroll)
+└── attendance/          # per-subject folders of daily CSVs
+    └── <Subject>/<Subject>_<date>.csv
+```
