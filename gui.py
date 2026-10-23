@@ -327,8 +327,12 @@ class App:
             card, ("id", "name", "time", "method"), ("ID", "Name", "Time", "By"),
             (60, 140, 80, 70), ("center", "w", "center", "center"), height=9)
         tframe.pack(fill="both", expand=True, padx=16, pady=(8, 8))
-        ttk.Button(card, text="Refresh", style="Ghost.TButton",
-                   command=self.refresh_today).pack(padx=16, pady=(0, 14), anchor="w")
+        tbar = tk.Frame(card, bg=C["card"])
+        tbar.pack(fill="x", padx=16, pady=(0, 14))
+        ttk.Button(tbar, text="Remove selected", style="Danger.TButton",
+                   command=self.remove_attendance).pack(side="left")
+        ttk.Button(tbar, text="Refresh", style="Ghost.TButton",
+                   command=self.refresh_today).pack(side="right")
 
     def refresh_attendance(self):
         subs = subjects.list_subjects()
@@ -384,6 +388,21 @@ class App:
         subjects.add_subject(subject)
         messagebox.showinfo("Manual attendance", attendance.mark_manually(subject, sid, name))
         self.refresh_today(); self.refresh_status()
+
+    def remove_attendance(self):
+        subject = self._current_subject()
+        if not subject:
+            return
+        sel = self.today_tree.selection()
+        if not sel:
+            messagebox.showwarning("Select", "Pick a record from 'Present today' to remove.")
+            return
+        sid, name = self.today_tree.item(sel[0], "values")[:2]
+        if not messagebox.askyesno("Remove attendance",
+                                   f"Remove {name} (id={sid}) from today's {subject} attendance?"):
+            return
+        messagebox.showinfo("Attendance", attendance.unmark(subject, sid))
+        self.refresh_today()
 
     def refresh_today(self):
         subject = subjects.sanitize(self.subject_var.get())

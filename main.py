@@ -23,9 +23,10 @@ def menu():
         print("4. Add another photo to a student (e.g. without glasses)")
         print("5. Take attendance (face) for a subject")
         print("6. Manual attendance for a subject")
-        print("7. Show attendance report")
-        print("8. List / delete enrolled students")
-        print("9. Launch graphical interface (GUI)")
+        print("7. Remove a student's attendance (unmark)")
+        print("8. Show attendance report")
+        print("9. List / delete enrolled students")
+        print("10. Launch graphical interface (GUI)")
         print("0. Exit")
         choice = input("Choose an option: ").strip()
 
@@ -62,9 +63,13 @@ def menu():
             sid = input("Student ID to mark present: ")
             print(attendance.mark_manually(subject, sid))
         elif choice == "7":
+            subject = input("Subject name: ")
+            sid = input("Student ID to remove from today's attendance: ")
+            print(attendance.unmark(subject, sid))
+        elif choice == "8":
             subject = input("Subject (blank = all): ").strip()
             report.print_summary(subject or None)
-        elif choice == "8":
+        elif choice == "9":
             enroll.list_students()
             sid = input("Enter an ID to delete (blank to skip): ").strip()
             if sid:
@@ -73,7 +78,7 @@ def menu():
                     print(f"No enrolled student with id '{sid}'.")
                 else:
                     print(f"Deleted {removed} (id={sid}). [{remaining} still enrolled]")
-        elif choice == "9":
+        elif choice == "10":
             import gui
             gui.main()
         elif choice == "0":

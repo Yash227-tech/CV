@@ -78,7 +78,8 @@ A tabbed desktop app:
   add another photo, delete, all shown in a table.
 - **Attendance** — pick a subject **once** from a dropdown (saved for next
   time), then "Start Face Attendance" or mark students manually; a live list
-  shows who's present today for that subject.
+  shows who's present today for that subject, and a teacher can **Remove
+  selected** to delete a wrong attendance record.
 - **Reports** — per-student attendance % per subject, with CSV export.
 
 ### Command-line menu

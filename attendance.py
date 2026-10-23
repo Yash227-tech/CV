@@ -85,6 +85,34 @@ def mark_manually(subject, student_id, name=None):
     return f"{name} (id={student_id}) was already marked for {sanitize_subject(subject)} today."
 
 
+def unmark(subject, student_id, date=None):
+    """Remove a student's attendance record for a subject on a given day.
+
+    Lets a teacher correct a wrong mark. Defaults to today. Returns a status
+    string.
+    """
+    student_id = str(student_id).strip()
+    path = csv_path_for(subject, date)
+    if not os.path.exists(path):
+        return f"No attendance file for {sanitize_subject(subject)} on that day."
+
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        fields = reader.fieldnames or ["id", "name", "date", "time", "method"]
+        rows = list(reader)
+
+    kept = [r for r in rows if r.get("id") != student_id]
+    removed_name = next((r.get("name", student_id) for r in rows if r.get("id") == student_id), None)
+    if removed_name is None:
+        return f"id '{student_id}' was not marked present for {sanitize_subject(subject)}."
+
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(kept)
+    return f"Removed attendance: {removed_name} (id={student_id}) from {sanitize_subject(subject)}."
+
+
 def best_match(embedding, enrolled):
     """enrolled is (N, 128) L2-normalised. Return (index, cosine_score) of best match."""
     if len(enrolled) == 0:
