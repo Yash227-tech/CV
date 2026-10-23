@@ -175,6 +175,16 @@ In the GUI's Attendance page: pick an **existing session** from the dropdown to
 view/edit it, or type a **New lecture label** (or leave blank) and press Start
 to begin a new one.
 
+### Teacher check-in (required before students)
+
+A lecture must be **opened by the teacher** before any student can be marked for
+it. On the Attendance page: enter the **Teacher** name and click **Open lecture
+(teacher check-in)**. Until then, *Start Face Attendance* and *Mark present
+(manual)* are blocked, and the session shows **"Not open — teacher check-in
+required"** (it turns green **"Open (teacher: …)"** once checked in). In the CLI,
+use *"Open a lecture (teacher check-in)"* first. Opening also counts the lecture
+as *held* in the report, even if no student attends.
+
 ## Tuning (`config.py`)
 
 - `CAMERA_INDEX` — change if the wrong camera opens (try `1`, `2`, ...).

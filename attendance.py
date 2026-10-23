@@ -17,6 +17,7 @@ Controls while the camera is open:
 import argparse
 import csv
 import glob
+import json
 import os
 from datetime import datetime
 
@@ -84,6 +85,55 @@ def today_sessions(subject: str):
     return [s for s in list_sessions(subject) if s.startswith(today + "_")]
 
 
+# ---- Teacher check-in: a lecture must be OPENED before students are marked --
+def _meta_path(subject, session):
+    subj = sanitize_subject(subject)
+    return os.path.join(subject_dir(subject), f"{subj}_{session}.meta.json")
+
+
+def open_session(subject, session=None, teacher="Teacher"):
+    """Teacher marks their presence to OPEN a lecture.
+
+    Student attendance (face or manual) is only allowed once a lecture is open.
+    Creates the (empty) session file and a meta record of the teacher + time.
+    Returns a status string.
+    """
+    session = session or make_session()
+    teacher = (teacher or "Teacher").strip() or "Teacher"
+    csv_path = csv_path_for(subject, session)
+    if not os.path.exists(csv_path):
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(["id", "name", "date", "time", "method"])
+
+    meta = _meta_path(subject, session)
+    if os.path.exists(meta):
+        info = _read_meta(meta)
+        return f"Lecture {session} is already open (teacher: {info.get('teacher', '?')})."
+    now = datetime.now()
+    with open(meta, "w", encoding="utf-8") as f:
+        json.dump({"teacher": teacher, "opened_at": f"{now:%Y-%m-%d %H:%M:%S}",
+                   "session": session}, f, indent=2)
+    return f"Lecture {session} opened by {teacher}. Student attendance is now allowed."
+
+
+def _read_meta(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def session_opened(subject, session):
+    """True if the teacher has opened (checked in to) this lecture."""
+    return bool(session) and os.path.exists(_meta_path(subject, session))
+
+
+def session_teacher(subject, session):
+    info = _read_meta(_meta_path(subject, session))
+    return info.get("teacher") if info else None
+
+
 def load_already_marked(path):
     marked = set()
     if os.path.exists(path):
@@ -121,6 +171,8 @@ def mark_manually(subject, student_id, name=None, session=None):
             return f"Unknown id '{student_id}' (not enrolled). Pass a name or enroll first."
         name = roster[student_id]
     session = session or make_session()
+    if not session_opened(subject, session):
+        return f"Lecture {session} is not open. The teacher must check in (open the lecture) first."
     path = csv_path_for(subject, session)
     if mark_present(path, student_id, name, method="manual"):
         return f"Marked present (manual): {name} (id={student_id}) for {sanitize_subject(subject)} [{session}]"
@@ -167,6 +219,9 @@ def run(subject, session=None):
     config.ensure_dirs()
     subject = sanitize_subject(subject)
     session = session or make_session()
+    if not session_opened(subject, session):
+        raise SystemExit(f"Lecture {session} is not open. The teacher must check in "
+                         f"(open the lecture) before taking student attendance.")
     ids, names, enrolled = store.load_enrollments()
     if len(ids) == 0:
         raise SystemExit("No students enrolled yet. Run enroll.py first.")

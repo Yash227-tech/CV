@@ -315,13 +315,25 @@ class App:
                  font=(FONT, 9)).grid(row=2, column=1, sticky="w", padx=(8, 0))
         self.session_combo = ttk.Combobox(inner, textvariable=self.session_var, width=24, state="readonly")
         self.session_combo.grid(row=3, column=0, sticky="w")
-        self.session_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_present())
+        self.session_combo.bind("<<ComboboxSelected>>", lambda e: self._on_session_change())
         self.new_session_entry = ttk.Entry(inner, width=14)
         self.new_session_entry.grid(row=3, column=1, sticky="w", padx=(8, 0))
         ttk.Button(inner, text="▶  Start Face Attendance", style="Big.TButton",
                    command=self.start_attendance).grid(row=3, column=2, padx=(18, 0))
-        tk.Label(card, text="Each 'Start' is one lecture. Leave the label blank for a time-stamped session, "
-                            "or type e.g. L1 / L2 for two lectures of the same subject in a day.",
+
+        # Row 3: teacher check-in (must open a lecture before students are marked)
+        trow = tk.Frame(card, bg=C["card"])
+        trow.pack(fill="x", padx=16, pady=(4, 6))
+        tk.Label(trow, text="Teacher", bg=C["card"], fg=C["muted"], font=(FONT, 9)).pack(side="left")
+        self.teacher_entry = ttk.Entry(trow, width=18)
+        self.teacher_entry.pack(side="left", padx=(8, 10))
+        ttk.Button(trow, text="Open lecture (teacher check-in)", style="Accent.TButton",
+                   command=self.open_lecture).pack(side="left")
+        self.session_status = tk.Label(trow, text="", bg=C["card"], font=(FONT, 10, "bold"))
+        self.session_status.pack(side="left", padx=14)
+
+        tk.Label(card, text="The teacher must Open a lecture first; only then is student attendance (face or "
+                            "manual) allowed. Each 'Start' / label is one lecture - a subject can have many per day.",
                  bg=C["card"], fg=C["muted"], font=(FONT, 9), justify="left").pack(anchor="w", padx=16, pady=(0, 12))
 
         panes = tk.Frame(page, bg=C["bg"])
@@ -364,11 +376,40 @@ class App:
             self.session_var.set(select)
         elif self.session_var.get() not in sess:
             self.session_var.set(sess[-1] if sess else "")
+        self._update_session_status()
+
+    def _update_session_status(self):
+        subject = subjects.sanitize(self.subject_var.get())
+        session = self.session_var.get().strip()
+        if subject and session and attendance.session_opened(subject, session):
+            t = attendance.session_teacher(subject, session) or "Teacher"
+            self.session_status.configure(text=f"● Open (teacher: {t})", fg=C["success"])
+        else:
+            self.session_status.configure(text="● Not open – teacher check-in required",
+                                          fg=C["danger"])
+
+    def _on_session_change(self):
+        self.refresh_present()
+        self._update_session_status()
 
     def _on_subject_change(self):
         self._refresh_sessions()
         self.refresh_present()
         self.refresh_status()
+
+    def open_lecture(self):
+        subject = self._current_subject()
+        if not subject:
+            return
+        subjects.add_subject(subject)
+        self.subject_combo["values"] = subjects.list_subjects()
+        session = self._target_session()
+        teacher = self.teacher_entry.get().strip() or "Teacher"
+        msg = attendance.open_session(subject, session, teacher)
+        self.new_session_entry.delete(0, "end")
+        self._refresh_sessions(select=session)
+        self.refresh_present()
+        messagebox.showinfo("Lecture", msg)
 
     def add_subject(self):
         name = subjects.add_subject(self.subject_var.get())
@@ -405,6 +446,11 @@ class App:
         subjects.add_subject(subject)
         self.subject_combo["values"] = subjects.list_subjects()
         session = self._target_session()
+        if not attendance.session_opened(subject, session):
+            messagebox.showwarning("Lecture not open",
+                                   "The teacher must Open this lecture (check in) before taking student "
+                                   "attendance.\n\nEnter a teacher name and click 'Open lecture'.")
+            return
         messagebox.showinfo("Attendance", f"Camera opens for '{subject}', session {session}.\nPress q to stop.")
         try:
             n = attendance.run(subject, session)

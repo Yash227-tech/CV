@@ -21,12 +21,13 @@ def menu():
         print("2. Enroll a student from a webcam snapshot")
         print("3. Enroll everyone from a folder of photos")
         print("4. Add another photo to a student (e.g. without glasses)")
-        print("5. Take attendance (face) for a subject")
-        print("6. Manual attendance for a subject")
-        print("7. Remove a student's attendance (unmark)")
-        print("8. Show attendance report")
-        print("9. List / delete enrolled students")
-        print("10. Launch graphical interface (GUI)")
+        print("5. Open a lecture (teacher check-in)")
+        print("6. Take attendance (face) for a subject")
+        print("7. Manual attendance for a subject")
+        print("8. Remove a student's attendance (unmark)")
+        print("9. Show attendance report")
+        print("10. List / delete enrolled students")
+        print("11. Launch graphical interface (GUI)")
         print("0. Exit")
         choice = input("Choose an option: ").strip()
 
@@ -57,24 +58,29 @@ def menu():
                     enroll.enroll_image(FaceEngine(), path, sid, name, append=True)
         elif choice == "5":
             subject = input("Subject name: ")
-            label = input("Lecture label (e.g. L1, blank = start time): ").strip()
-            attendance.run(subject, attendance.make_session(label or None))
+            label = input("Lecture label (e.g. L1; use a label so you can reopen it): ").strip()
+            teacher = input("Teacher name: ").strip() or "Teacher"
+            print(attendance.open_session(subject, attendance.make_session(label or None), teacher))
         elif choice == "6":
             subject = input("Subject name: ")
-            sid = input("Student ID to mark present: ")
-            label = input("Lecture label (blank = new time-based session): ").strip()
-            print(attendance.mark_manually(subject, sid, session=attendance.make_session(label) if label else None))
+            label = input("Lecture label of the OPEN lecture (e.g. L1): ").strip()
+            attendance.run(subject, attendance.make_session(label or None))
         elif choice == "7":
+            subject = input("Subject name: ")
+            sid = input("Student ID to mark present: ")
+            label = input("Lecture label of the OPEN lecture: ").strip()
+            print(attendance.mark_manually(subject, sid, session=attendance.make_session(label) if label else None))
+        elif choice == "8":
             subject = input("Subject name: ")
             sess = attendance.today_sessions(subject)
             print("Today's sessions:", ", ".join(sess) if sess else "(none)")
             session = input("Session token to edit: ").strip()
             sid = input("Student ID to remove: ")
             print(attendance.unmark(subject, sid, session))
-        elif choice == "8":
+        elif choice == "9":
             subject = input("Subject (blank = all): ").strip()
             report.print_summary(subject or None)
-        elif choice == "9":
+        elif choice == "10":
             enroll.list_students()
             sid = input("Enter an ID to delete (blank to skip): ").strip()
             if sid:
@@ -83,7 +89,7 @@ def menu():
                     print(f"No enrolled student with id '{sid}'.")
                 else:
                     print(f"Deleted {removed} (id={sid}). [{remaining} still enrolled]")
-        elif choice == "10":
+        elif choice == "11":
             import gui
             gui.main()
         elif choice == "0":
