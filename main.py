@@ -27,7 +27,8 @@ def menu():
         print("8. Remove a student's attendance (unmark)")
         print("9. Show attendance report")
         print("10. List / delete enrolled students")
-        print("11. Launch graphical interface (GUI)")
+        print("11. Launch teacher app (attendance GUI)")
+        print("12. Launch admin console (tech team: enroll students & teachers)")
         print("0. Exit")
         choice = input("Choose an option: ").strip()
 
@@ -92,6 +93,9 @@ def menu():
         elif choice == "11":
             import gui
             gui.main()
+        elif choice == "12":
+            import admin
+            admin.main()
         elif choice == "0":
             print("Bye.")
             break

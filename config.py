@@ -23,6 +23,9 @@ ENROLL_PATH = os.path.join(MODEL_DIR, "enrollments.npz")
 # Remembered subject names (so they appear in the GUI dropdown across sessions).
 SUBJECTS_PATH = os.path.join(MODEL_DIR, "subjects.json")
 
+# Registered teachers (managed by the tech-team admin console).
+TEACHERS_PATH = os.path.join(MODEL_DIR, "teachers.json")
+
 # ---- Camera -----------------------------------------------------------------
 CAMERA_INDEX = 0            # 0 = default webcam; change if you have multiple cams
 

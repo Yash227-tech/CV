@@ -28,16 +28,30 @@ Attend:   compare live vector to all references (cosine) ───────�
           best match ≥ threshold  ──►  mark present in daily CSV
 ```
 
-| Script | What it does |
+### Two apps, by role
+
+The system is split so **teachers and students never see the setup screens**:
+
+| App | Who runs it | What it does |
+|-----|-------------|--------------|
+| **`admin.py`** — Admin console | **Tech team** (setup) | Enroll & manage **students** (faces) and **teachers** |
+| **`gui.py`** — Teacher app | **Teachers** (daily use) | Open lecture, take attendance (face/manual), reports — *no enrollment screens* |
+
+Both share the same backend modules below.
+
+| Backend module | What it does |
 |--------|--------------|
-| `gui.py` | **Graphical interface** (Tkinter) for everything below |
 | `enroll.py` | Enroll students from a single photo each (file, folder, or webcam snapshot) |
-| `attendance.py` | Recognize faces live, or mark manually; writes per-subject CSVs |
+| `attendance.py` | Lecture sessions, teacher check-in, recognition + manual marking |
 | `report.py` | Per-student attendance %, per subject; CSV export |
-| `main.py` | Command-line menu that runs everything |
-| `face_engine.py` | Shared detect + embed helper |
-| `store.py` | Loads/saves the enrolled embeddings (`model/enrollments.npz`) |
+| `teachers.py` | Teacher registry (managed in the admin console) |
+| `subjects.py` | Remembered subject names |
+| `face_engine.py` | Detect (YuNet) + embed (SFace) |
+| `liveness.py` | Anti-spoofing: passive CNN + active move/turn check |
+| `store.py` | Enrolled face embeddings (`model/enrollments.npz`) |
+| `ui_common.py` | Shared theme + window shell for both apps |
 | `config.py` | Paths and settings |
+| `main.py` | All-in-one command-line menu (tech/dev) |
 
 ### Features
 
@@ -66,21 +80,29 @@ pip install -r requirements.txt
 
 ## Usage
 
-### Graphical interface (easiest)
+### The two apps
 
 ```bash
-python gui.py
+python admin.py   # Tech team: enroll students & teachers (run this first)
+python gui.py     # Teachers: open lecture, take attendance, reports
 ```
 
-A tabbed desktop app:
+Typical setup: the tech team runs **`admin.py`** once to enroll students (with a
+photo each) and add teachers. Teachers then use **`gui.py`** day to day — they
+pick their name, open the lecture, and take attendance. They never see the
+enrollment screens.
 
-- **Students** — enroll (image / webcam / folder) via inline ID/Name fields,
-  add another photo, delete, all shown in a table.
-- **Attendance** — pick a subject **once** from a dropdown (saved for next
-  time), then "Start Face Attendance" or mark students manually; a live list
-  shows who's present today for that subject, and a teacher can **Remove
-  selected** to delete a wrong attendance record.
+The teacher app has three pages:
+
+- **Dashboard** — counts and a short how-to.
+- **Attendance** — pick a subject, select your name and **Open lecture**
+  (check-in), then "Start Face Attendance" or mark students manually; a live
+  list shows who's present in the selected session, and you can **Remove
+  selected** to delete a wrong record.
 - **Reports** — per-student attendance % per subject, with CSV export.
+
+The admin console (`admin.py`) has **Students** (enroll from image/webcam/folder,
+add another photo, delete) and **Teachers** (add / delete) pages.
 
 ### Command-line menu
 
@@ -250,18 +272,21 @@ people.
 
 ```
 Mini/
+├── admin.py             # TECH-TEAM app: enroll students & teachers
+├── gui.py               # TEACHER app: attendance + reports
+├── ui_common.py         # shared theme + window shell
 ├── config.py
 ├── face_engine.py       # detect (YuNet) + embed (SFace)
 ├── store.py             # enrolled embeddings storage
 ├── enroll.py            # single-photo enrollment
 ├── liveness.py          # anti-spoofing: passive CNN + active move/turn check
-├── attendance.py        # recognize + mark attendance (per subject, + manual)
+├── attendance.py        # sessions, teacher check-in, recognition + manual
 ├── report.py            # per-student attendance %, export
-├── subjects.py          # remembered subject names for the GUI dropdown
-├── gui.py               # Tkinter graphical interface
-├── main.py              # command-line menu
+├── subjects.py          # remembered subject names
+├── teachers.py          # teacher registry
+├── main.py              # all-in-one command-line menu
 ├── requirements.txt
-├── model/               # ONNX models + enrollments.npz (created on enroll)
-└── attendance/          # per-subject folders of daily CSVs
-    └── <Subject>/<Subject>_<date>.csv
+├── model/               # ONNX models + enrollments.npz / subjects.json / teachers.json
+└── attendance/          # per-subject folders of per-session CSVs
+    └── <Subject>/<Subject>_<date>_<label>.csv
 ```
