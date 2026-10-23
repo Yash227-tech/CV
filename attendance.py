@@ -102,6 +102,17 @@ def run(subject):
         raise SystemExit("No students enrolled yet. Run enroll.py first.")
 
     engine = FaceEngine()
+
+    # Anti-spoofing: passive CNN + active (move/turn) challenge.
+    live = active = None
+    if config.ANTISPOOF_ENABLED:
+        from liveness import LivenessDetector, ActiveLiveness, yaw_proxy
+        live = LivenessDetector()
+        active = ActiveLiveness()
+        if not live.available():
+            print("WARNING: anti-spoof model not found at", config.ANTISPOOF_PATH)
+            print("         Running WITHOUT spoof protection (see README to add it).")
+
     cam = cv2.VideoCapture(config.CAMERA_INDEX)
     if not cam.isOpened():
         raise SystemExit("Could not open the webcam. Check CAMERA_INDEX in config.py.")
@@ -111,6 +122,8 @@ def run(subject):
 
     print(f"\nAttendance running for subject: {subject}. {len(ids)} student(s) enrolled.")
     print(f"Writing to: {csv_path}")
+    if config.ANTISPOOF_ENABLED and live.available():
+        print("Anti-spoofing ON" + (" + move/turn challenge." if config.ACTIVE_LIVENESS_ENABLED else "."))
     print("Press 'q' to stop.\n")
 
     try:
@@ -123,18 +136,39 @@ def run(subject):
                 x, y, w, h = face[:4].astype(int)
                 emb = engine.embed(frame, face)
                 idx, score = best_match(emb, enrolled)
+                recognized = score >= config.COSINE_THRESHOLD
 
-                if score >= config.COSINE_THRESHOLD:
+                # ---- Passive liveness (photo / screen rejection) -------------
+                passive_ok, p = (True, None)
+                if live is not None:
+                    passive_ok, p = live.is_real(frame, (x, y, w, h))
+
+                RED, GREEN, YELLOW, ORANGE = (0, 0, 255), (0, 255, 0), (0, 255, 255), (0, 165, 255)
+
+                if live is not None and not passive_ok:
+                    # Looks like a photo or a screen - never mark.
+                    text, color = f"SPOOF? {p:.2f}", RED
+                elif not recognized:
+                    text, color = f"Unknown ({score:.2f})", RED
+                else:
                     student_id, name = ids[idx], names[idx]
-                    text = f"{name} ({score:.2f})"
-                    color = (0, 255, 0)
-                    if student_id not in marked:
+                    if student_id in marked:
+                        text, color = f"{name} (present)", GREEN
+                    elif active is not None:
+                        # Active challenge: require real streak + head movement.
+                        active.update(student_id, passive_ok, yaw_proxy(face))
+                        if active.passed(student_id):
+                            mark_present(csv_path, student_id, name, method="face")
+                            marked.add(student_id)
+                            print(f"  Marked present: {name} (id={student_id}) at {datetime.now():%H:%M:%S}")
+                            text, color = f"{name} (present)", GREEN
+                        else:
+                            text, color = f"{name}: turn head slowly", YELLOW
+                    else:
                         mark_present(csv_path, student_id, name, method="face")
                         marked.add(student_id)
                         print(f"  Marked present: {name} (id={student_id}) at {datetime.now():%H:%M:%S}")
-                else:
-                    text = f"Unknown ({score:.2f})"
-                    color = (0, 0, 255)
+                        text, color = f"{name} (present)", GREEN
 
                 cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
                 cv2.putText(frame, text, (x, max(20, y - 10)),

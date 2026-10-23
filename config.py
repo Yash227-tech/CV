@@ -41,6 +41,23 @@ DET_MAX_SIDE = 640
 # cosine threshold for SFace. Raise it to be stricter, lower to be more lenient.
 COSINE_THRESHOLD = 0.363
 
+# ---- Anti-spoofing / liveness (presentation-attack detection) ---------------
+# Rejects printed photos and phone/laptop screens held up to the camera.
+# Two layers are combined (see attendance.py):
+#   1. Passive: a CNN (MiniFASNet) classifies each face crop as real vs spoof.
+#   2. Active : the person must move/turn their head (a flat photo can't).
+ANTISPOOF_ENABLED = True
+ANTISPOOF_PATH = os.path.join(MODEL_DIR, "AntiSpoofing_bin_1.5_128.onnx")
+ANTISPOOF_THRESHOLD = 0.55   # min "real" probability (0-1); raise to be stricter
+ANTISPOOF_BBOX_INC = 1.5     # face-crop expansion factor the model was trained with
+
+# Active-liveness gate: before marking, a student must be seen as "real" for a
+# few frames AND show head movement of at least this many pixels (normalised to
+# face size). Set ACTIVE_LIVENESS_ENABLED = False to use the passive model only.
+ACTIVE_LIVENESS_ENABLED = True
+ACTIVE_REAL_FRAMES = 3       # consecutive passive-real frames required
+ACTIVE_MOVE_RATIO = 0.08     # head movement needed, as a fraction of face width
+
 # During enrollment, also store the embedding of a horizontally-flipped copy of
 # the photo. This is a free extra reference that improves robustness to pose.
 # (It does NOT help with glasses on/off - for that, add a second photo of the

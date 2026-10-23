@@ -56,11 +56,13 @@ Requires Python 3.8+ and a webcam.
 pip install -r requirements.txt
 ```
 
-**Model files** (already downloaded into `model/`): if you ever need them again,
-get these from the OpenCV Zoo and place them in `model/`:
+**Model files** (already in `model/`): if you ever need them again:
 
-- `face_detection_yunet_2023mar.onnx`
-- `face_recognition_sface_2021dec.onnx`
+- `face_detection_yunet_2023mar.onnx` — detector (OpenCV Zoo)
+- `face_recognition_sface_2021dec.onnx` — recognizer (OpenCV Zoo)
+- `AntiSpoofing_bin_1.5_128.onnx` — liveness / anti-spoof model
+  ([hairymax/Face-AntiSpoofing](https://github.com/hairymax/Face-AntiSpoofing),
+  `saved_models/`)
 
 ## Usage
 
@@ -169,6 +171,29 @@ column records whether the mark came from face recognition or a manual entry.
 - `DET_SCORE_THRESH` — minimum face-detection confidence.
 - `DET_MAX_SIDE` — big photos are downscaled to this longer-side size before
   detection (YuNet can miss faces in very high-res images).
+- `ANTISPOOF_ENABLED` / `ANTISPOOF_THRESHOLD` — turn liveness on/off and set how
+  strict the "real face" check is (higher = stricter).
+- `ACTIVE_LIVENESS_ENABLED`, `ACTIVE_REAL_FRAMES`, `ACTIVE_MOVE_RATIO` — the
+  move/turn-your-head challenge and how much movement it requires.
+
+## Anti-spoofing (stops photos / phone screens)
+
+A printed photo or a phone/laptop screen held to the camera would otherwise be
+recognised as the real student. Two layers prevent this, both applied before a
+student is marked present:
+
+1. **Passive** — a CNN (MiniFASNet) classifies each face as **real vs spoof**,
+   catching the recapture artifacts of a photo or screen (flatness, moiré,
+   glare, bezels). Faces below `ANTISPOOF_THRESHOLD` are shown as `SPOOF?` and
+   never marked.
+2. **Active** — the student must be seen as real for a few frames **and turn
+   their head slightly**; a flat photo can't, so it's rejected. On screen the
+   box reads `turn head slowly` until the challenge passes.
+
+This runs automatically during face attendance (not for manual marking). It
+needs a real webcam to exercise, and a high-quality **video replay** can still
+sometimes defeat the passive layer — defeating video too needs depth/IR
+hardware.
 
 ## Why this instead of "collect 50 samples + LBPH"?
 
@@ -182,8 +207,10 @@ people.
 ## Notes & limitations (useful for a report)
 
 - Enroll with a **clear, well-lit, roughly frontal** photo for best results.
-- No **liveness / anti-spoofing** — a photo on a phone could fool it. A real
-  deployment would add liveness detection.
+- **Liveness / anti-spoofing is built in** (passive CNN + move-your-head
+  challenge) to reject printed photos and phone screens. A high-quality video
+  replay can still sometimes pass the passive layer; depth/IR hardware would be
+  needed to fully stop that.
 - Very low-contrast or heavily stylised images (e.g. old prints) may fail
   detection.
 - Accuracy still depends on lighting, pose, and camera quality at attendance
@@ -197,8 +224,10 @@ Mini/
 ├── face_engine.py       # detect (YuNet) + embed (SFace)
 ├── store.py             # enrolled embeddings storage
 ├── enroll.py            # single-photo enrollment
+├── liveness.py          # anti-spoofing: passive CNN + active move/turn check
 ├── attendance.py        # recognize + mark attendance (per subject, + manual)
 ├── report.py            # per-student attendance %, export
+├── subjects.py          # remembered subject names for the GUI dropdown
 ├── gui.py               # Tkinter graphical interface
 ├── main.py              # command-line menu
 ├── requirements.txt

@@ -1,5 +1,6 @@
 attendance/
 model/enrollments.npz
+model/subjects.json
 __pycache__/
 *.pyc
 .venv/
