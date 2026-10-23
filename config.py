@@ -48,8 +48,14 @@ COSINE_THRESHOLD = 0.363
 #   2. Active : the person must move/turn their head (a flat photo can't).
 ANTISPOOF_ENABLED = True
 ANTISPOOF_PATH = os.path.join(MODEL_DIR, "AntiSpoofing_bin_1.5_128.onnx")
-ANTISPOOF_THRESHOLD = 0.55   # min "real" probability (0-1); raise to be stricter
+ANTISPOOF_THRESHOLD = 0.5    # min "real" probability (0-1); raise to be stricter
 ANTISPOOF_BBOX_INC = 1.5     # face-crop expansion factor the model was trained with
+
+# The passive score is smoothed over frames to avoid false "SPOOF" flicker (for
+# example as a real person moves closer to the camera). We take the MEDIAN of
+# the last SMOOTH_WINDOW scores and only decide after SMOOTH_MIN frames.
+SMOOTH_WINDOW = 7
+SMOOTH_MIN = 5
 
 # Active-liveness gate: before marking, a student must be seen as "real" for a
 # few frames AND show head movement of at least this many pixels (normalised to

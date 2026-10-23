@@ -132,36 +132,34 @@ def run(subject):
             if not ok:
                 continue
 
+            RED, GREEN, YELLOW = (0, 0, 255), (0, 255, 0), (0, 255, 255)
+
             for face in engine.detect(frame):
                 x, y, w, h = face[:4].astype(int)
                 emb = engine.embed(frame, face)
                 idx, score = best_match(emb, enrolled)
                 recognized = score >= config.COSINE_THRESHOLD
 
-                # ---- Passive liveness (photo / screen rejection) -------------
-                passive_ok, p = (True, None)
-                if live is not None:
-                    passive_ok, p = live.is_real(frame, (x, y, w, h))
-
-                RED, GREEN, YELLOW, ORANGE = (0, 0, 255), (0, 255, 0), (0, 255, 255), (0, 165, 255)
-
-                if live is not None and not passive_ok:
-                    # Looks like a photo or a screen - never mark.
-                    text, color = f"SPOOF? {p:.2f}", RED
-                elif not recognized:
+                if not recognized:
                     text, color = f"Unknown ({score:.2f})", RED
                 else:
                     student_id, name = ids[idx], names[idx]
                     if student_id in marked:
                         text, color = f"{name} (present)", GREEN
                     elif active is not None:
-                        # Active challenge: require real streak + head movement.
-                        active.update(student_id, passive_ok, yaw_proxy(face))
-                        if active.passed(student_id):
+                        # Passive score (smoothed over frames) + movement check.
+                        p = live.real_score(frame, (x, y, w, h)) if live is not None else None
+                        active.update(student_id, p, yaw_proxy(face))
+                        if active.is_spoof(student_id):
+                            s = active.smoothed_real(student_id)
+                            text, color = f"SPOOF? {s:.2f}", RED
+                        elif active.passed(student_id):
                             mark_present(csv_path, student_id, name, method="face")
                             marked.add(student_id)
                             print(f"  Marked present: {name} (id={student_id}) at {datetime.now():%H:%M:%S}")
                             text, color = f"{name} (present)", GREEN
+                        elif not active.real_enough(student_id):
+                            text, color = f"{name}: hold still, verifying", YELLOW
                         else:
                             text, color = f"{name}: turn head slowly", YELLOW
                     else:

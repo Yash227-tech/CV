@@ -34,11 +34,14 @@ def increased_crop(img_rgb, face_xywh, bbox_inc=1.5):
     y2 = real_h if y + l * bbox_inc > real_h else int(y + l * bbox_inc)
 
     crop = img_rgb[y1:y2, x1:x2, :]
+    # When the face is close to the camera the expanded box runs past the frame
+    # edges. Replicate the edge pixels instead of adding black bars - the model
+    # was never trained on black-bordered faces and would call them "spoof".
     crop = cv2.copyMakeBorder(
         crop,
         y1 - y, int(l * bbox_inc - y2 + y),
         x1 - x, int(l * bbox_inc) - x2 + x,
-        cv2.BORDER_CONSTANT, value=[0, 0, 0],
+        cv2.BORDER_REPLICATE,
     )
     return crop
 
@@ -104,27 +107,53 @@ def yaw_proxy(face_row):
 
 
 class ActiveLiveness:
-    """Per-student state machine for the 'must move/turn head' challenge."""
+    """Per-student liveness state: a smoothed passive score + a movement check.
+
+    The passive score is noisy frame to frame (especially as the person moves
+    closer/further), so we keep a short window and use its MEDIAN rather than
+    trusting any single frame. A spoof decision is only made after a few frames
+    have been seen (warm-up), so approaching the camera doesn't flash "SPOOF".
+    """
 
     def __init__(self):
         self.state = {}
 
-    def update(self, key, passive_ok, yaw):
-        st = self.state.setdefault(key, {"streak": 0, "yaw": []})
-        st["streak"] = st["streak"] + 1 if passive_ok else 0
+    def update(self, key, real_prob, yaw):
+        st = self.state.setdefault(key, {"probs": [], "yaw": []})
+        if real_prob is not None:
+            st["probs"].append(real_prob)
+            st["probs"] = st["probs"][-config.SMOOTH_WINDOW:]
         st["yaw"].append(yaw)
-        st["yaw"] = st["yaw"][-30:]   # keep a short recent window
+        st["yaw"] = st["yaw"][-30:]
         return st
 
+    def smoothed_real(self, key):
+        """Median real-probability over the recent window, or None if no model."""
+        p = self.state.get(key, {}).get("probs", [])
+        return float(np.median(p)) if p else None
+
+    def _warm(self, key):
+        return len(self.state.get(key, {}).get("probs", [])) >= config.SMOOTH_MIN
+
+    def is_spoof(self, key):
+        """True only once enough frames agree the face is not live."""
+        s = self.smoothed_real(key)
+        if s is None:
+            return False  # no passive model -> can't call it spoof
+        return self._warm(key) and s < config.ANTISPOOF_THRESHOLD
+
     def real_enough(self, key):
-        return self.state.get(key, {}).get("streak", 0) >= config.ACTIVE_REAL_FRAMES
+        s = self.smoothed_real(key)
+        if s is None:  # no passive model: just need a few frames seen
+            return len(self.state.get(key, {}).get("yaw", [])) >= config.ACTIVE_REAL_FRAMES
+        return self._warm(key) and s >= config.ANTISPOOF_THRESHOLD
 
     def moved(self, key):
         y = self.state.get(key, {}).get("yaw", [])
         return (max(y) - min(y)) >= config.ACTIVE_MOVE_RATIO if len(y) >= 2 else False
 
     def passed(self, key):
-        """True when both the passive-real streak and the movement check are met."""
+        """Marked only when the face is reliably real AND the head has moved."""
         if not config.ACTIVE_LIVENESS_ENABLED:
             return self.real_enough(key)
         return self.real_enough(key) and self.moved(key)

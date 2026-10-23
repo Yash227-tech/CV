@@ -195,6 +195,13 @@ needs a real webcam to exercise, and a high-quality **video replay** can still
 sometimes defeat the passive layer — defeating video too needs depth/IR
 hardware.
 
+**If a real student is wrongly flagged `SPOOF?`** (e.g. when close to the
+camera): the score is median-smoothed over `SMOOTH_WINDOW` frames to stop
+single-frame flicker, and the crop uses edge replication so a face filling the
+frame isn't surrounded by black bars. If it still happens, **lower**
+`ANTISPOOF_THRESHOLD` (e.g. 0.4) and keep a little space so the whole face and
+some background are visible. If spoofs get through, **raise** it (e.g. 0.6).
+
 ## Why this instead of "collect 50 samples + LBPH"?
 
 LBPH (and most classical classifiers) need **many** samples per person and
