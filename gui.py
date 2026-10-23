@@ -55,8 +55,8 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title("Face Recognition Attendance")
-        root.geometry("980x660")
-        root.minsize(900, 600)
+        root.geometry("1040x680")
+        root.minsize(940, 620)
         root.configure(bg=C["bg"])
         config.ensure_dirs()
 
@@ -293,20 +293,36 @@ class App:
 
     # ---- Attendance ---------------------------------------------------------
     def _build_attendance(self, page):
+        self.session_var = tk.StringVar()
         wrap, card = self._card(page)
         wrap.pack(fill="x")
         inner = tk.Frame(card, bg=C["card"])
         inner.pack(fill="x", padx=16, pady=16)
-        tk.Label(inner, text="Subject", bg=C["card"], fg=C["muted"],
-                 font=(FONT, 9)).grid(row=0, column=0, sticky="w")
-        self.subject_combo = ttk.Combobox(inner, textvariable=self.subject_var, width=26)
-        self.subject_combo.grid(row=1, column=0, sticky="w")
+
+        # Row 1: subject
+        tk.Label(inner, text="Subject", bg=C["card"], fg=C["muted"], font=(FONT, 9)).grid(row=0, column=0, sticky="w")
+        self.subject_combo = ttk.Combobox(inner, textvariable=self.subject_var, width=24)
+        self.subject_combo.grid(row=1, column=0, sticky="w", pady=(0, 10))
         self.subject_combo.bind("<<ComboboxSelected>>", lambda e: self._on_subject_change())
         self.subject_combo.bind("<Return>", lambda e: self.add_subject())
-        ttk.Button(inner, text="Add / set subject", style="Ghost.TButton",
-                   command=self.add_subject).grid(row=1, column=1, padx=10)
+        ttk.Button(inner, text="Add / set", style="Ghost.TButton",
+                   command=self.add_subject).grid(row=1, column=1, padx=8, pady=(0, 10))
+
+        # Row 2: session + start
+        tk.Label(inner, text="Session (existing)", bg=C["card"], fg=C["muted"],
+                 font=(FONT, 9)).grid(row=2, column=0, sticky="w")
+        tk.Label(inner, text="or New lecture label", bg=C["card"], fg=C["muted"],
+                 font=(FONT, 9)).grid(row=2, column=1, sticky="w", padx=(8, 0))
+        self.session_combo = ttk.Combobox(inner, textvariable=self.session_var, width=24, state="readonly")
+        self.session_combo.grid(row=3, column=0, sticky="w")
+        self.session_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_present())
+        self.new_session_entry = ttk.Entry(inner, width=14)
+        self.new_session_entry.grid(row=3, column=1, sticky="w", padx=(8, 0))
         ttk.Button(inner, text="▶  Start Face Attendance", style="Big.TButton",
-                   command=self.start_attendance).grid(row=1, column=2, padx=(20, 0))
+                   command=self.start_attendance).grid(row=3, column=2, padx=(18, 0))
+        tk.Label(card, text="Each 'Start' is one lecture. Leave the label blank for a time-stamped session, "
+                            "or type e.g. L1 / L2 for two lectures of the same subject in a day.",
+                 bg=C["card"], fg=C["muted"], font=(FONT, 9), justify="left").pack(anchor="w", padx=16, pady=(0, 12))
 
         panes = tk.Frame(page, bg=C["bg"])
         panes.pack(fill="both", expand=True, pady=(16, 0))
@@ -322,7 +338,7 @@ class App:
 
         wrap, card = self._card(panes)
         wrap.pack(side="left", fill="both", expand=True, padx=(8, 0))
-        self._card_title(card, "Present today (this subject)")
+        self._card_title(card, "Present in selected session")
         tframe, self.today_tree = self._styled_tree(
             card, ("id", "name", "time", "method"), ("ID", "Name", "Time", "By"),
             (60, 140, 80, 70), ("center", "w", "center", "center"), height=9)
@@ -332,16 +348,26 @@ class App:
         ttk.Button(tbar, text="Remove selected", style="Danger.TButton",
                    command=self.remove_attendance).pack(side="left")
         ttk.Button(tbar, text="Refresh", style="Ghost.TButton",
-                   command=self.refresh_today).pack(side="right")
+                   command=self.refresh_present).pack(side="right")
 
     def refresh_attendance(self):
-        subs = subjects.list_subjects()
-        self.subject_combo["values"] = subs
+        self.subject_combo["values"] = subjects.list_subjects()
         self._fill_tree(self.manual_tree, [(s, n) for s, n, _ in store.roster()])
-        self.refresh_today()
+        self._refresh_sessions()
+        self.refresh_present()
+
+    def _refresh_sessions(self, select=None):
+        subject = subjects.sanitize(self.subject_var.get())
+        sess = attendance.today_sessions(subject) if subject else []
+        self.session_combo["values"] = sess
+        if select:
+            self.session_var.set(select)
+        elif self.session_var.get() not in sess:
+            self.session_var.set(sess[-1] if sess else "")
 
     def _on_subject_change(self):
-        self.refresh_today()
+        self._refresh_sessions()
+        self.refresh_present()
         self.refresh_status()
 
     def add_subject(self):
@@ -359,6 +385,16 @@ class App:
             messagebox.showwarning("Subject", "Select or type a subject first.")
         return name
 
+    def _target_session(self):
+        """Session to write into: a typed New label wins, else the selected
+        session, else a fresh time-based one."""
+        label = self.new_session_entry.get().strip()
+        if label:
+            return attendance.make_session(label)
+        if self.session_var.get().strip():
+            return self.session_var.get().strip()
+        return attendance.make_session()
+
     def start_attendance(self):
         if store.student_count() == 0:
             messagebox.showwarning("No students", "Enroll at least one student first.")
@@ -368,13 +404,16 @@ class App:
             return
         subjects.add_subject(subject)
         self.subject_combo["values"] = subjects.list_subjects()
-        messagebox.showinfo("Attendance", f"Camera opens for '{subject}'.\nPress q to stop.")
+        session = self._target_session()
+        messagebox.showinfo("Attendance", f"Camera opens for '{subject}', session {session}.\nPress q to stop.")
         try:
-            n = attendance.run(subject)
+            n = attendance.run(subject, session)
         except Exception as e:
             messagebox.showerror("Error", str(e)); return
-        messagebox.showinfo("Done", f"{n} student(s) marked present for {subject}.")
-        self.refresh_today(); self.refresh_status()
+        self.new_session_entry.delete(0, "end")
+        messagebox.showinfo("Done", f"{n} student(s) marked present for {subject} [{session}].")
+        self._refresh_sessions(select=session)
+        self.refresh_present(); self.refresh_status()
 
     def manual_mark(self):
         subject = self._current_subject()
@@ -386,29 +425,37 @@ class App:
             return
         sid, name = self.manual_tree.item(sel[0], "values")
         subjects.add_subject(subject)
-        messagebox.showinfo("Manual attendance", attendance.mark_manually(subject, sid, name))
-        self.refresh_today(); self.refresh_status()
+        session = self._target_session()
+        messagebox.showinfo("Manual attendance", attendance.mark_manually(subject, sid, name, session))
+        self.new_session_entry.delete(0, "end")
+        self._refresh_sessions(select=session)
+        self.refresh_present(); self.refresh_status()
 
     def remove_attendance(self):
         subject = self._current_subject()
         if not subject:
             return
+        session = self.session_var.get().strip()
+        if not session:
+            messagebox.showwarning("Session", "Select a session on the left first.")
+            return
         sel = self.today_tree.selection()
         if not sel:
-            messagebox.showwarning("Select", "Pick a record from 'Present today' to remove.")
+            messagebox.showwarning("Select", "Pick a record from the session list to remove.")
             return
         sid, name = self.today_tree.item(sel[0], "values")[:2]
         if not messagebox.askyesno("Remove attendance",
-                                   f"Remove {name} (id={sid}) from today's {subject} attendance?"):
+                                   f"Remove {name} (id={sid}) from {subject} session {session}?"):
             return
-        messagebox.showinfo("Attendance", attendance.unmark(subject, sid))
-        self.refresh_today()
+        messagebox.showinfo("Attendance", attendance.unmark(subject, sid, session))
+        self.refresh_present()
 
-    def refresh_today(self):
+    def refresh_present(self):
         subject = subjects.sanitize(self.subject_var.get())
+        session = self.session_var.get().strip()
         rows = []
-        if subject:
-            path = attendance.csv_path_for(subject)
+        if subject and session:
+            path = attendance.csv_path_for(subject, session)
             if os.path.exists(path):
                 with open(path, newline="", encoding="utf-8") as f:
                     for r in csv.DictReader(f):
@@ -438,8 +485,8 @@ class App:
         wrap.pack(fill="both", expand=True, pady=(16, 0))
         tframe, self.report_tree = self._styled_tree(
             card, ("id", "name", "present", "total", "percent"),
-            ("ID", "Name", "Days present", "Total days", "Attendance %"),
-            (80, 240, 110, 100, 120), ("center", "w", "center", "center", "center"), height=11)
+            ("ID", "Name", "Sessions attended", "Total sessions", "Attendance %"),
+            (80, 240, 140, 120, 120), ("center", "w", "center", "center", "center"), height=11)
         tframe.pack(fill="both", expand=True, padx=16, pady=16)
 
     def refresh_reports(self):
@@ -457,11 +504,11 @@ class App:
         subject = self.report_subject_var.get()
         if not subject:
             return
-        dates, rows = report.build_summary(subject)
+        sessions, rows = report.build_summary(subject)
         self.report_info.configure(
-            text=(f"{len(dates)} day(s)  ({dates[0]} .. {dates[-1]})" if dates else "no records"))
+            text=(f"{len(sessions)} session(s)" if sessions else "no records"))
         self._fill_tree(self.report_tree, [
-            (r["id"], r["name"], r["days_present"], r["total_days"], f"{r['percent']:.1f}%")
+            (r["id"], r["name"], r["sessions_attended"], r["total_sessions"], f"{r['percent']:.1f}%")
             for r in rows])
 
     def export_report(self):

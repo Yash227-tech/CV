@@ -16,6 +16,7 @@ Controls while the camera is open:
 """
 import argparse
 import csv
+import glob
 import os
 from datetime import datetime
 
@@ -38,10 +39,49 @@ def subject_dir(subject: str) -> str:
     return d
 
 
-def csv_path_for(subject: str, date: str = None) -> str:
-    date = date or f"{datetime.now():%Y-%m-%d}"
+def sanitize_label(label: str) -> str:
+    s = "".join(c for c in label.strip() if c.isalnum() or c in (" ", "_", "-")).replace(" ", "_")
+    return s
+
+
+def make_session(label: str = None) -> str:
+    """Build a session token '<date>_<label>'.
+
+    A session is one lecture. Give a label (e.g. 'L1', 'Lecture2') to make a
+    named, resumable session; leave it blank and the current time is used, so
+    each run of the same subject on the same day is a distinct session - which
+    is exactly how two lectures of one subject in a day are kept separate.
+    """
+    now = datetime.now()
+    lab = sanitize_label(label) if (label and label.strip()) else f"{now:%H%M}"
+    return f"{now:%Y-%m-%d}_{lab}"
+
+
+def csv_path_for(subject: str, session: str = None) -> str:
+    """Path to a session's CSV. `session` is a token from make_session();
+    if omitted, a new time-based session for today is created."""
+    session = session or make_session()
     subj = sanitize_subject(subject)
-    return os.path.join(subject_dir(subject), f"{subj}_{date}.csv")
+    return os.path.join(subject_dir(subject), f"{subj}_{session}.csv")
+
+
+def list_sessions(subject: str):
+    """All session tokens recorded for a subject, sorted (oldest first)."""
+    subj = sanitize_subject(subject)
+    prefix = f"{subj}_"
+    out = []
+    for f in glob.glob(os.path.join(subject_dir(subject), f"{subj}_*.csv")):
+        base = os.path.basename(f)
+        if base == "summary.csv":
+            continue
+        out.append(base[len(prefix):-4])
+    return sorted(out)
+
+
+def today_sessions(subject: str):
+    """Session tokens for a subject recorded today."""
+    today = f"{datetime.now():%Y-%m-%d}"
+    return [s for s in list_sessions(subject) if s.startswith(today + "_")]
 
 
 def load_already_marked(path):
@@ -67,10 +107,11 @@ def mark_present(path, student_id, name, method="face"):
     return True
 
 
-def mark_manually(subject, student_id, name=None):
-    """Mark a student present by id, without the camera.
+def mark_manually(subject, student_id, name=None, session=None):
+    """Mark a student present by id, without the camera, for a given session.
 
-    If name is None it is looked up from the enrollments. Returns a status string.
+    If name is None it is looked up from the enrollments. If session is None a
+    new time-based session is created. Returns a status string.
     """
     ids, names, _ = store.load_enrollments()
     roster = dict(zip(ids, names))
@@ -79,22 +120,22 @@ def mark_manually(subject, student_id, name=None):
         if student_id not in roster:
             return f"Unknown id '{student_id}' (not enrolled). Pass a name or enroll first."
         name = roster[student_id]
-    path = csv_path_for(subject)
+    session = session or make_session()
+    path = csv_path_for(subject, session)
     if mark_present(path, student_id, name, method="manual"):
-        return f"Marked present (manual): {name} (id={student_id}) for {sanitize_subject(subject)}"
-    return f"{name} (id={student_id}) was already marked for {sanitize_subject(subject)} today."
+        return f"Marked present (manual): {name} (id={student_id}) for {sanitize_subject(subject)} [{session}]"
+    return f"{name} (id={student_id}) was already marked in session {session}."
 
 
-def unmark(subject, student_id, date=None):
-    """Remove a student's attendance record for a subject on a given day.
+def unmark(subject, student_id, session):
+    """Remove a student's attendance record from a specific session.
 
-    Lets a teacher correct a wrong mark. Defaults to today. Returns a status
-    string.
+    Lets a teacher correct a wrong mark. Returns a status string.
     """
     student_id = str(student_id).strip()
-    path = csv_path_for(subject, date)
+    path = csv_path_for(subject, session)
     if not os.path.exists(path):
-        return f"No attendance file for {sanitize_subject(subject)} on that day."
+        return f"No attendance file for {sanitize_subject(subject)} session {session}."
 
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -122,9 +163,10 @@ def best_match(embedding, enrolled):
     return i, float(scores[i])
 
 
-def run(subject):
+def run(subject, session=None):
     config.ensure_dirs()
     subject = sanitize_subject(subject)
+    session = session or make_session()
     ids, names, enrolled = store.load_enrollments()
     if len(ids) == 0:
         raise SystemExit("No students enrolled yet. Run enroll.py first.")
@@ -145,10 +187,10 @@ def run(subject):
     if not cam.isOpened():
         raise SystemExit("Could not open the webcam. Check CAMERA_INDEX in config.py.")
 
-    csv_path = csv_path_for(subject)
+    csv_path = csv_path_for(subject, session)
     marked = load_already_marked(csv_path)
 
-    print(f"\nAttendance running for subject: {subject}. {len(ids)} student(s) enrolled.")
+    print(f"\nAttendance running for subject: {subject}, session: {session}. {len(ids)} student(s) enrolled.")
     print(f"Writing to: {csv_path}")
     if config.ANTISPOOF_ENABLED and live.available():
         print("Anti-spoofing ON" + (" + move/turn challenge." if config.ACTIVE_LIVENESS_ENABLED else "."))
@@ -200,7 +242,7 @@ def run(subject):
                 cv2.putText(frame, text, (x, max(20, y - 10)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
-            cv2.putText(frame, f"{subject} | Present: {len(marked)}", (10, 30),
+            cv2.putText(frame, f"{subject} [{session}] | Present: {len(marked)}", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 0), 2)
             cv2.imshow("Attendance - press q to quit", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
@@ -209,7 +251,7 @@ def run(subject):
         cam.release()
         cv2.destroyAllWindows()
 
-    print(f"\nSession ended. {len(marked)} student(s) marked present for {subject} today.")
+    print(f"\nSession {session} ended. {len(marked)} student(s) marked present for {subject}.")
     if marked:
         print(f"See: {csv_path}")
     return len(marked)
@@ -218,9 +260,10 @@ def run(subject):
 def main():
     parser = argparse.ArgumentParser(description="Take attendance for a subject.")
     parser.add_argument("--subject", help="Subject name, e.g. Maths")
+    parser.add_argument("--session", help="Lecture label, e.g. L1 (blank = start time)")
     args = parser.parse_args()
     subject = args.subject or input("Subject name: ")
-    run(subject)
+    run(subject, make_session(args.session))
 
 
 if __name__ == "__main__":

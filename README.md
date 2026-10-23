@@ -149,19 +149,31 @@ python report.py --subject Maths --export            # write summary.csv
 During webcam use a window opens — press **`q`** to quit (SPACE to capture in
 `--webcam` enroll).
 
-## Output
+## Output & sessions
 
-Attendance is saved per subject, per day, e.g.
-`attendance/Maths/Maths_2026-10-21.csv`:
+Attendance is saved **per session** (one lecture). Each "Start Face Attendance"
+is a session, named by date + a label (the start time by default, or a label
+you type such as `L1`). This is how **two lectures of the same subject in one
+day** stay separate, e.g.:
+
+```
+attendance/Maths/Maths_2026-10-23_L1.csv
+attendance/Maths/Maths_2026-10-23_L2.csv
+```
 
 ```csv
 id,name,date,time,method
-101,Alice,2026-10-21,09:14:02,face
-102,Bob,2026-10-21,09:14:05,manual
+101,Alice,2026-10-23,09:14:02,face
+102,Bob,2026-10-23,09:14:05,manual
 ```
 
-Each student is marked **present only once per subject per day**. The `method`
-column records whether the mark came from face recognition or a manual entry.
+Each student is marked **once per session**. Attendance % in the report is
+**sessions attended / total sessions**. The `method` column records whether the
+mark came from face recognition or a manual entry.
+
+In the GUI's Attendance page: pick an **existing session** from the dropdown to
+view/edit it, or type a **New lecture label** (or leave blank) and press Start
+to begin a new one.
 
 ## Tuning (`config.py`)
 

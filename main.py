@@ -57,15 +57,20 @@ def menu():
                     enroll.enroll_image(FaceEngine(), path, sid, name, append=True)
         elif choice == "5":
             subject = input("Subject name: ")
-            attendance.run(subject)
+            label = input("Lecture label (e.g. L1, blank = start time): ").strip()
+            attendance.run(subject, attendance.make_session(label or None))
         elif choice == "6":
             subject = input("Subject name: ")
             sid = input("Student ID to mark present: ")
-            print(attendance.mark_manually(subject, sid))
+            label = input("Lecture label (blank = new time-based session): ").strip()
+            print(attendance.mark_manually(subject, sid, session=attendance.make_session(label) if label else None))
         elif choice == "7":
             subject = input("Subject name: ")
-            sid = input("Student ID to remove from today's attendance: ")
-            print(attendance.unmark(subject, sid))
+            sess = attendance.today_sessions(subject)
+            print("Today's sessions:", ", ".join(sess) if sess else "(none)")
+            session = input("Session token to edit: ").strip()
+            sid = input("Student ID to remove: ")
+            print(attendance.unmark(subject, sid, session))
         elif choice == "8":
             subject = input("Subject (blank = all): ").strip()
             report.print_summary(subject or None)
