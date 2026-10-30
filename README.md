@@ -98,11 +98,14 @@ The teacher app has three pages:
 - **Attendance** — pick a subject, select your name and **Open lecture**
   (check-in), then "Start Face Attendance" or mark students manually; a live
   list shows who's present in the selected session, and you can **Remove
-  selected** to delete a wrong record.
+  selected** to delete a wrong record. When the lecture is over, click **Close
+  lecture (end)** so no more attendance can be marked for it.
 - **Reports** — per-student attendance % per subject, with CSV export.
 
 The admin console (`admin.py`) has **Students** (enroll from image/webcam/folder,
-add another photo, delete) and **Teachers** (add / delete) pages.
+add another photo, delete) and **Teachers** (add, **enroll face** from
+image/webcam, add another photo, remove face, delete) pages. A teacher needs a
+**face enrolled** here before they can open or close lectures in the teacher app.
 
 ### Command-line menu
 
@@ -200,12 +203,28 @@ to begin a new one.
 ### Teacher check-in (required before students)
 
 A lecture must be **opened by the teacher** before any student can be marked for
-it. On the Attendance page: enter the **Teacher** name and click **Open lecture
-(teacher check-in)**. Until then, *Start Face Attendance* and *Mark present
-(manual)* are blocked, and the session shows **"Not open — teacher check-in
-required"** (it turns green **"Open (teacher: …)"** once checked in). In the CLI,
-use *"Open a lecture (teacher check-in)"* first. Opening also counts the lecture
-as *held* in the report, even if no student attends.
+it, and opening is **verified by the teacher's face** — not just a name. On the
+Attendance page click **Open lecture (face check-in)**: a camera window opens and
+the teacher must be recognised as a **registered teacher** (matched against the
+faces enrolled in the admin console) *and* pass the same **liveness** check as
+students (so a photo of a teacher can't open a lecture). Until a lecture is open,
+*Start Face Attendance* and *Mark present (manual)* are blocked, and the session
+shows **"Not open — teacher check-in required"** (it turns green **"Open
+(teacher: …)"** once checked in). In the CLI, use *"Open a lecture"* first.
+Opening also counts the lecture as *held* in the report, even if no student
+attends.
+
+> Why a face scan (not just a name)? Students are verified by face, so teacher
+> check-in is too — otherwise anyone could pick a teacher's name from a list and
+> open a lecture. This requires each teacher to have a **face enrolled** in the
+> admin console (`teacher_enrollments.npz`, kept separate from students).
+
+**Closing a lecture.** When the class is over, click **Close lecture (end)** (or
+CLI option *"Close a lecture"*). Closing is **also face-verified** (a registered
+teacher must pass the scan). The session then shows grey **"Closed (teacher: …)"**
+and no further attendance — face or manual — can be marked for it, so a lecture
+ends cleanly. Opening the same lecture again **re-opens** it (useful if it was
+closed by mistake); marks already recorded are kept.
 
 ## Tuning (`config.py`)
 
@@ -286,7 +305,7 @@ Mini/
 ├── teachers.py          # teacher registry
 ├── main.py              # all-in-one command-line menu
 ├── requirements.txt
-├── model/               # ONNX models + enrollments.npz / subjects.json / teachers.json
+├── model/               # ONNX models + enrollments.npz / teacher_enrollments.npz / subjects.json / teachers.json
 └── attendance/          # per-subject folders of per-session CSVs
     └── <Subject>/<Subject>_<date>_<label>.csv
 ```

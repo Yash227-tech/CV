@@ -12,9 +12,12 @@ Run:
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+import config
 import store
 import teachers
 from ui_common import BaseApp, C, FONT
+
+IMAGE_TYPES = [("Images", "*.jpg *.jpeg *.png *.bmp"), ("All files", "*.*")]
 
 # The face engine loads ~37 MB of models, so create it lazily and reuse it.
 _engine = None
@@ -169,19 +172,35 @@ class AdminApp(BaseApp):
         self.t_id = ttk.Entry(form, width=14); self.t_id.grid(row=1, column=0, sticky="w")
         self.t_name = ttk.Entry(form, width=26); self.t_name.grid(row=1, column=1, sticky="w", padx=(10, 16))
         ttk.Button(form, text="Add teacher", style="Accent.TButton", command=self.add_teacher).grid(row=1, column=2, padx=4)
+        ttk.Button(form, text="Enroll face (image)", style="Ghost.TButton",
+                   command=lambda: self.enroll_teacher_face("image")).grid(row=1, column=3, padx=4)
+        ttk.Button(form, text="Enroll face (webcam)", style="Ghost.TButton",
+                   command=lambda: self.enroll_teacher_face("webcam")).grid(row=1, column=4, padx=4)
+        tk.Label(card, text="A teacher needs a face enrolled to open or close lectures in the teacher app. "
+                            "Enter ID + Name, then enroll their face.",
+                 bg=C["card"], fg=C["muted"], font=(FONT, 9), justify="left", wraplength=820).pack(anchor="w", padx=16, pady=(0, 10))
 
         wrap, card = self._card(page)
         wrap.pack(fill="both", expand=True, pady=(16, 0))
         self._card_title(card, "Registered teachers")
         tframe, self.tea_tree = self._styled_tree(
-            card, ("id", "name"), ("ID", "Name"), (120, 360), ("center", "w"), height=10)
+            card, ("id", "name", "face"), ("ID", "Name", "Face enrolled"),
+            (110, 320, 150), ("center", "w", "center"), height=10)
         tframe.pack(fill="both", expand=True, padx=16, pady=(8, 8))
         bar = tk.Frame(card, bg=C["card"]); bar.pack(fill="x", padx=16, pady=(0, 14))
-        ttk.Button(bar, text="Delete selected", style="Danger.TButton", command=self.delete_teacher).pack(side="left")
+        ttk.Button(bar, text="Add face to selected", style="Ghost.TButton",
+                   command=self.add_teacher_face).pack(side="left", padx=(0, 6))
+        ttk.Button(bar, text="Remove face", style="Ghost.TButton",
+                   command=self.remove_teacher_face).pack(side="left", padx=6)
+        ttk.Button(bar, text="Delete selected", style="Danger.TButton", command=self.delete_teacher).pack(side="left", padx=6)
         ttk.Button(bar, text="Refresh", style="Ghost.TButton", command=self.refresh_teachers).pack(side="right")
 
     def refresh_teachers(self):
-        self._fill_tree(self.tea_tree, teachers.list_teachers())
+        rows = []
+        for tid, name in teachers.list_teachers():
+            refs = teachers.face_refs(tid)
+            rows.append((tid, name, f"{refs} photo{'s' if refs != 1 else ''}" if refs else "— no face"))
+        self._fill_tree(self.tea_tree, rows)
 
     def add_teacher(self):
         tid, name = self.t_id.get().strip(), self.t_name.get().strip()
@@ -191,13 +210,69 @@ class AdminApp(BaseApp):
             self.refresh_teachers(); self.refresh_status()
         messagebox.showinfo("Teachers", msg)
 
+    def _do_teacher_face(self, tid, name, source, append):
+        """Enroll a teacher's face into the teacher store. Ensures the teacher
+        exists in the registry first."""
+        teachers.add_teacher(tid, name)  # idempotent: create/refresh registry entry
+        import enroll as enr
+        tpath = config.TEACHER_ENROLL_PATH
+        try:
+            if source == "image":
+                img = filedialog.askopenfilename(title=f"Photo of {name}", filetypes=IMAGE_TYPES)
+                if not img:
+                    return
+                ok = enr.enroll_image(get_engine(), img, tid, name, append=append, path=tpath)
+                if not ok:
+                    messagebox.showwarning("No face", "Could not detect a face in that image.")
+                    return
+            else:
+                messagebox.showinfo("Webcam", "A camera window opens.\nPress SPACE to capture, q to cancel.")
+                enr.enroll_webcam(get_engine(), tid, name, append=append, path=tpath)
+        except Exception as e:
+            messagebox.showerror("Error", str(e)); return
+        messagebox.showinfo("Teacher face",
+                            f"{'Added another photo for' if append else 'Enrolled face for'} {name} (id={tid}).")
+        self.refresh_teachers(); self.refresh_status()
+
+    def enroll_teacher_face(self, source):
+        tid, name = self.t_id.get().strip(), self.t_name.get().strip()
+        if not tid or not name:
+            messagebox.showwarning("Missing info", "Enter both an ID and a Name first.")
+            return
+        self._do_teacher_face(tid, name, source, append=False)
+        self.t_id.delete(0, "end"); self.t_name.delete(0, "end")
+
+    def add_teacher_face(self):
+        sel = self.tea_tree.selection()
+        if not sel:
+            messagebox.showwarning("Select a teacher", "Pick a teacher from the table first.")
+            return
+        tid, name = self.tea_tree.item(sel[0], "values")[:2]
+        source = "image" if messagebox.askyesno(
+            "Source", f"Add a face photo for {name}.\n\nYes = image file,  No = webcam") else "webcam"
+        self._do_teacher_face(tid, name, source, append=True)
+
+    def remove_teacher_face(self):
+        sel = self.tea_tree.selection()
+        if not sel:
+            messagebox.showwarning("Select a teacher", "Pick a teacher from the table first.")
+            return
+        tid, name = self.tea_tree.item(sel[0], "values")[:2]
+        if not teachers.has_face(tid):
+            messagebox.showinfo("Teacher face", f"{name} has no face enrolled.")
+            return
+        if messagebox.askyesno("Remove face", f"Remove {name}'s enrolled face?\n\n"
+                                              "They will not be able to open/close lectures until re-enrolled."):
+            teachers.remove_face(tid)
+            self.refresh_teachers(); self.refresh_status()
+
     def delete_teacher(self):
         sel = self.tea_tree.selection()
         if not sel:
             messagebox.showwarning("Select a teacher", "Pick a teacher from the table first.")
             return
         tid, name = self.tea_tree.item(sel[0], "values")[:2]
-        if messagebox.askyesno("Confirm delete", f"Delete teacher {name} (id={tid})?"):
+        if messagebox.askyesno("Confirm delete", f"Delete teacher {name} (id={tid}) and their enrolled face?"):
             messagebox.showinfo("Teachers", teachers.delete_teacher(tid))
             self.refresh_teachers(); self.refresh_status()
 

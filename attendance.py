@@ -96,7 +96,8 @@ def open_session(subject, session=None, teacher="Teacher"):
 
     Student attendance (face or manual) is only allowed once a lecture is open.
     Creates the (empty) session file and a meta record of the teacher + time.
-    Returns a status string.
+    Opening a lecture that was previously CLOSED re-opens it. Returns a status
+    string.
     """
     session = session or make_session()
     teacher = (teacher or "Teacher").strip() or "Teacher"
@@ -105,15 +106,44 @@ def open_session(subject, session=None, teacher="Teacher"):
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             csv.writer(f).writerow(["id", "name", "date", "time", "method"])
 
+    now = datetime.now()
     meta = _meta_path(subject, session)
     if os.path.exists(meta):
         info = _read_meta(meta)
+        if info.get("closed_at"):
+            # Re-open a closed lecture (e.g. closed by mistake).
+            info.pop("closed_at", None)
+            info["reopened_at"] = f"{now:%Y-%m-%d %H:%M:%S}"
+            with open(meta, "w", encoding="utf-8") as f:
+                json.dump(info, f, indent=2)
+            return f"Lecture {session} re-opened. Student attendance is allowed again."
         return f"Lecture {session} is already open (teacher: {info.get('teacher', '?')})."
-    now = datetime.now()
     with open(meta, "w", encoding="utf-8") as f:
         json.dump({"teacher": teacher, "opened_at": f"{now:%Y-%m-%d %H:%M:%S}",
                    "session": session}, f, indent=2)
     return f"Lecture {session} opened by {teacher}. Student attendance is now allowed."
+
+
+def close_session(subject, session=None, teacher=None):
+    """Teacher ENDS a lecture. After closing, no further student attendance
+    (face or manual) can be marked for it until it is re-opened.
+
+    Returns a status string.
+    """
+    session = session or make_session()
+    meta = _meta_path(subject, session)
+    if not os.path.exists(meta):
+        return f"Lecture {session} is not open, so it cannot be closed."
+    info = _read_meta(meta)
+    if info.get("closed_at"):
+        return f"Lecture {session} is already closed (at {info['closed_at']})."
+    now = datetime.now()
+    info["closed_at"] = f"{now:%Y-%m-%d %H:%M:%S}"
+    if teacher and teacher.strip():
+        info["closed_by"] = teacher.strip()
+    with open(meta, "w", encoding="utf-8") as f:
+        json.dump(info, f, indent=2)
+    return f"Lecture {session} closed. No further attendance can be marked for it."
 
 
 def _read_meta(path):
@@ -132,6 +162,19 @@ def session_opened(subject, session):
 def session_teacher(subject, session):
     info = _read_meta(_meta_path(subject, session))
     return info.get("teacher") if info else None
+
+
+def session_closed(subject, session):
+    """True if the teacher has closed (ended) this lecture."""
+    info = _read_meta(_meta_path(subject, session))
+    return bool(info) and bool(info.get("closed_at"))
+
+
+def session_status(subject, session):
+    """'none' (never opened), 'open' (accepting attendance) or 'closed'."""
+    if not session_opened(subject, session):
+        return "none"
+    return "closed" if session_closed(subject, session) else "open"
 
 
 def load_already_marked(path):
@@ -173,6 +216,8 @@ def mark_manually(subject, student_id, name=None, session=None):
     session = session or make_session()
     if not session_opened(subject, session):
         return f"Lecture {session} is not open. The teacher must check in (open the lecture) first."
+    if session_closed(subject, session):
+        return f"Lecture {session} is closed. Re-open it before marking attendance."
     path = csv_path_for(subject, session)
     if mark_present(path, student_id, name, method="manual"):
         return f"Marked present (manual): {name} (id={student_id}) for {sanitize_subject(subject)} [{session}]"
@@ -222,6 +267,8 @@ def run(subject, session=None):
     if not session_opened(subject, session):
         raise SystemExit(f"Lecture {session} is not open. The teacher must check in "
                          f"(open the lecture) before taking student attendance.")
+    if session_closed(subject, session):
+        raise SystemExit(f"Lecture {session} is closed. Re-open it before taking attendance.")
     ids, names, enrolled = store.load_enrollments()
     if len(ids) == 0:
         raise SystemExit("No students enrolled yet. Run enroll.py first.")
@@ -310,6 +357,83 @@ def run(subject, session=None):
     if marked:
         print(f"See: {csv_path}")
     return len(marked)
+
+
+def verify_teacher(purpose="open", window_title=None):
+    """Open the webcam and verify a LIVE, registered teacher's face.
+
+    Full liveness (passive CNN + active move/turn) is applied, exactly like
+    student attendance, so a photo of a teacher cannot pass. Returns a dict:
+        {"ok": bool, "id": str|None, "name": str|None, "reason": str}
+    where reason is one of: verified, cancelled, no_faces, no_camera.
+    Press 'q' to cancel.
+    """
+    import teachers
+    config.ensure_dirs()
+    tids, tnames, tembs = teachers.face_embeddings()
+    if len(tids) == 0:
+        return {"ok": False, "id": None, "name": None, "reason": "no_faces"}
+
+    engine = FaceEngine()
+    live = active = None
+    if config.ANTISPOOF_ENABLED:
+        from liveness import LivenessDetector, ActiveLiveness, yaw_proxy
+        live = LivenessDetector()
+        active = ActiveLiveness()
+
+    cam = cv2.VideoCapture(config.CAMERA_INDEX)
+    if not cam.isOpened():
+        return {"ok": False, "id": None, "name": None, "reason": "no_camera"}
+
+    title = window_title or f"Teacher check-in ({purpose}) - look at the camera, q to cancel"
+    RED, GREEN, YELLOW = (0, 0, 255), (0, 255, 0), (0, 255, 255)
+    verified = None
+    try:
+        while True:
+            ok, frame = cam.read()
+            if not ok:
+                continue
+            for face in engine.detect(frame):
+                x, y, w, h = face[:4].astype(int)
+                emb = engine.embed(frame, face)
+                idx, score = best_match(emb, tembs)
+                if score < config.COSINE_THRESHOLD:
+                    text, color = f"Unknown ({score:.2f})", RED
+                else:
+                    tid, name = tids[idx], tnames[idx]
+                    if active is not None:
+                        p = live.real_score(frame, (x, y, w, h)) if live is not None else None
+                        active.update(tid, p, yaw_proxy(face))
+                        if active.is_spoof(tid):
+                            text, color = f"SPOOF? {active.smoothed_real(tid):.2f}", RED
+                        elif active.passed(tid):
+                            verified = (tid, name); text, color = f"{name}: verified", GREEN
+                        elif not active.real_enough(tid):
+                            text, color = f"{name}: hold still, verifying", YELLOW
+                        else:
+                            text, color = f"{name}: turn head slowly", YELLOW
+                    else:
+                        verified = (tid, name); text, color = f"{name}: verified", GREEN
+                cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+                cv2.putText(frame, text, (x, max(20, y - 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                if verified:
+                    break
+            cv2.putText(frame, f"Teacher check-in ({purpose}) | q = cancel", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+            cv2.imshow(title, frame)
+            if verified:
+                cv2.waitKey(500)   # briefly show the "verified" frame
+                break
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+    finally:
+        cam.release()
+        cv2.destroyAllWindows()
+
+    if verified:
+        return {"ok": True, "id": verified[0], "name": verified[1], "reason": "verified"}
+    return {"ok": False, "id": None, "name": None, "reason": "cancelled"}
 
 
 def main():

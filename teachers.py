@@ -9,6 +9,11 @@ import json
 import os
 
 import config
+import store
+
+# Teacher face embeddings live in their own .npz (see config.TEACHER_ENROLL_PATH)
+# so a teacher is never matched as a student during attendance.
+FACE_PATH = config.TEACHER_ENROLL_PATH
 
 
 def _load():
@@ -65,9 +70,36 @@ def delete_teacher(teacher_id):
     if len(kept) == len(rows):
         return f"No teacher with id '{tid}'."
     _save(kept)
+    store.delete(tid, FACE_PATH)   # also drop any enrolled face
     return f"Deleted teacher id={tid}."
 
 
 def display_names():
     """Human-friendly strings for a dropdown, e.g. 'Dr. Smith (T01)'."""
     return [f"{name} ({tid})" for tid, name in list_teachers()]
+
+
+# ---- Teacher face enrollment (for face-verified lecture check-in) -----------
+def face_embeddings():
+    """(ids, names, embeddings) of all enrolled teacher faces."""
+    return store.load_enrollments(FACE_PATH)
+
+
+def faces_count():
+    """Number of teachers who have a face enrolled."""
+    return store.student_count(FACE_PATH)
+
+
+def face_refs(teacher_id):
+    """How many reference photos a teacher's face has (0 = none enrolled)."""
+    return store.reference_count(teacher_id, FACE_PATH)
+
+
+def has_face(teacher_id):
+    return face_refs(teacher_id) > 0
+
+
+def remove_face(teacher_id):
+    """Delete a teacher's enrolled face only (keeps the registry entry)."""
+    removed, _ = store.delete(_sanitize(teacher_id), FACE_PATH)
+    return removed is not None

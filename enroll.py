@@ -26,18 +26,20 @@ from face_engine import FaceEngine
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp")
 
 
-def _store_refs(student_id, name, embs, append):
-    """append=True adds to a student's existing references; False replaces them."""
+def _store_refs(student_id, name, embs, append, path=None):
+    """append=True adds to a person's existing references; False replaces them.
+    path selects the store (default = students; config.TEACHER_ENROLL_PATH =
+    teacher faces)."""
     if append:
-        refs, total = store.add_references(student_id, name, embs)
+        refs, total = store.add_references(student_id, name, embs, path)
         verb = "added photo to"
     else:
-        refs, total = store.set_references(student_id, name, embs)
+        refs, total = store.set_references(student_id, name, embs, path)
         verb = "enrolled"
-    print(f"  {verb}: {name} (id={student_id})  [references: {refs}, students: {total}]")
+    print(f"  {verb}: {name} (id={student_id})  [references: {refs}, total: {total}]")
 
 
-def enroll_image(engine, image_path, student_id, name, append=False):
+def enroll_image(engine, image_path, student_id, name, append=False, path=None):
     img = cv2.imread(image_path)
     if img is None:
         print(f"  ! Could not read image: {image_path}")
@@ -46,7 +48,7 @@ def enroll_image(engine, image_path, student_id, name, append=False):
     if not embs:
         print(f"  ! No face detected in: {image_path}")
         return False
-    _store_refs(student_id, name, embs, append)
+    _store_refs(student_id, name, embs, append, path)
     return True
 
 
@@ -69,7 +71,7 @@ def enroll_dir(engine, folder):
     print(f"\nEnrolled {ok}/{len(files)} student(s).")
 
 
-def enroll_webcam(engine, student_id, name, append=False):
+def enroll_webcam(engine, student_id, name, append=False, path=None):
     cam = cv2.VideoCapture(config.CAMERA_INDEX)
     if not cam.isOpened():
         raise SystemExit("Could not open the webcam. Check CAMERA_INDEX in config.py.")
@@ -107,7 +109,7 @@ def enroll_webcam(engine, student_id, name, append=False):
     if not embs:
         print("No face found in the captured frame.")
         return
-    _store_refs(student_id, name, embs, append)
+    _store_refs(student_id, name, embs, append, path)
 
 
 def list_students():

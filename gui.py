@@ -71,11 +71,13 @@ class TeacherApp(BaseApp):
         wrap.pack(fill="both", expand=True, pady=(18, 0))
         self._card_title(card, "How to take attendance")
         steps = ("1.  Go to Attendance and choose your Subject.\n"
-                 "2.  Check in: select your name as the Teacher and click 'Open lecture'.\n"
+                 "2.  Check in: click 'Open lecture' and verify your face at the camera.\n"
                  "3.  Click 'Start Face Attendance' (or mark students manually).\n"
                  "        Students look at the camera and turn their head slightly (anti-spoofing).\n"
-                 "4.  See attendance % per subject in Reports.\n\n"
-                 "Students and teachers are added by the tech team in the admin console.")
+                 "4.  When the class ends, click 'Close lecture' (verify your face again).\n"
+                 "5.  See attendance % per subject in Reports.\n\n"
+                 "Students and teachers (with their face photos) are added by the tech team\n"
+                 "in the admin console.")
         tk.Label(card, text=steps, bg=C["card"], fg=C["text"], font=(FONT, 11),
                  justify="left").pack(anchor="w", padx=18, pady=(8, 18))
 
@@ -110,17 +112,17 @@ class TeacherApp(BaseApp):
                    command=self.start_attendance).grid(row=3, column=2, padx=(18, 0))
 
         trow = tk.Frame(card, bg=C["card"]); trow.pack(fill="x", padx=16, pady=(4, 6))
-        tk.Label(trow, text="Teacher", bg=C["card"], fg=C["muted"], font=(FONT, 9)).pack(side="left")
-        self.teacher_combo = ttk.Combobox(trow, textvariable=self.teacher_var, width=22, state="readonly")
-        self.teacher_combo.pack(side="left", padx=(8, 10))
-        ttk.Button(trow, text="Open lecture (check-in)", style="Accent.TButton",
+        ttk.Button(trow, text="Open lecture (face check-in)", style="Accent.TButton",
                    command=self.open_lecture).pack(side="left")
+        ttk.Button(trow, text="Close lecture (end)", style="Danger.TButton",
+                   command=self.close_lecture).pack(side="left", padx=(8, 0))
         self.session_status = tk.Label(trow, text="", bg=C["card"], font=(FONT, 10, "bold"))
         self.session_status.pack(side="left", padx=14)
 
-        tk.Label(card, text="Select your name and Open the lecture first; only then is student attendance "
-                            "allowed. Each lecture is a session - a subject can have many per day.",
-                 bg=C["card"], fg=C["muted"], font=(FONT, 9), justify="left").pack(anchor="w", padx=16, pady=(0, 12))
+        tk.Label(card, text="Open the lecture first - you verify your face at the camera (registered "
+                            "teachers only); only then is student attendance allowed. Closing a lecture "
+                            "also needs your face. Each lecture is a session - a subject can have many per day.",
+                 bg=C["card"], fg=C["muted"], font=(FONT, 9), justify="left", wraplength=820).pack(anchor="w", padx=16, pady=(0, 12))
 
         panes = tk.Frame(page, bg=C["bg"]); panes.pack(fill="both", expand=True, pady=(16, 0))
         wrap, card = self._card(panes)
@@ -145,7 +147,6 @@ class TeacherApp(BaseApp):
 
     def refresh_attendance(self):
         self.subject_combo["values"] = subjects.list_subjects()
-        self.teacher_combo["values"] = teachers.display_names()
         self._fill_tree(self.manual_tree, [(s, n) for s, n, _ in store.roster()])
         self._refresh_sessions()
         self.refresh_present()
@@ -163,9 +164,13 @@ class TeacherApp(BaseApp):
     def _update_session_status(self):
         subject = subjects.sanitize(self.subject_var.get())
         session = self.session_var.get().strip()
-        if subject and session and attendance.session_opened(subject, session):
+        status = attendance.session_status(subject, session) if (subject and session) else "none"
+        if status == "open":
             t = attendance.session_teacher(subject, session) or "Teacher"
             self.session_status.configure(text=f"● Open (teacher: {t})", fg=C["success"])
+        elif status == "closed":
+            t = attendance.session_teacher(subject, session) or "Teacher"
+            self.session_status.configure(text=f"● Closed (teacher: {t})", fg=C["muted"])
         else:
             self.session_status.configure(text="● Not open – teacher check-in required", fg=C["danger"])
 
@@ -201,14 +206,36 @@ class TeacherApp(BaseApp):
             return self.session_var.get().strip()
         return attendance.make_session()
 
+    def _verify_teacher(self, purpose):
+        """Scan + verify a registered teacher's face. Returns the teacher name,
+        or None (a message is shown explaining why)."""
+        if teachers.faces_count() == 0:
+            messagebox.showwarning(
+                "No teacher faces",
+                "No teacher has a face enrolled yet. Ask the tech team to enrol teacher "
+                "photos in the admin console before lectures can be opened or closed.")
+            return None
+        messagebox.showinfo("Teacher check-in",
+                            f"A camera window opens to verify your face before you {purpose} the lecture.\n\n"
+                            "Look at the camera and turn your head slightly (anti-spoofing). Press q to cancel.")
+        res = attendance.verify_teacher(purpose)
+        if res["ok"]:
+            return res["name"]
+        reason = {
+            "no_faces": "No teacher faces are enrolled. Ask the tech team to enrol teacher photos.",
+            "no_camera": "Could not open the webcam. Check CAMERA_INDEX in config.py.",
+            "cancelled": "Face not verified (cancelled or no registered teacher recognised). "
+                         f"The lecture was not {purpose}ed.",
+        }.get(res["reason"], "Teacher not verified.")
+        messagebox.showwarning("Not verified", reason)
+        return None
+
     def open_lecture(self):
         subject = self._current_subject()
         if not subject:
             return
-        teacher = self.teacher_var.get().strip()
+        teacher = self._verify_teacher("open")
         if not teacher:
-            messagebox.showwarning("Teacher", "Select your name. If the list is empty, ask the tech "
-                                              "team to add teachers in the admin console.")
             return
         subjects.add_subject(subject)
         self.subject_combo["values"] = subjects.list_subjects()
@@ -216,6 +243,29 @@ class TeacherApp(BaseApp):
         msg = attendance.open_session(subject, session, teacher)
         self.new_session_entry.delete(0, "end")
         self._refresh_sessions(select=session)
+        self.refresh_present()
+        messagebox.showinfo("Lecture", msg)
+
+    def close_lecture(self):
+        subject = self._current_subject()
+        if not subject:
+            return
+        session = self.session_var.get().strip()
+        if not session:
+            messagebox.showwarning("Session", "Select the lecture (session) you want to close first.")
+            return
+        if attendance.session_status(subject, session) != "open":
+            messagebox.showinfo("Lecture", f"Lecture {session} is not open, so there is nothing to close.")
+            return
+        if not messagebox.askyesno("Close lecture",
+                                   f"End (close) {subject} lecture {session}?\n\n"
+                                   "No further attendance can be marked for it until it is re-opened."):
+            return
+        teacher = self._verify_teacher("close")
+        if not teacher:
+            return
+        msg = attendance.close_session(subject, session, teacher)
+        self._update_session_status()
         self.refresh_present()
         messagebox.showinfo("Lecture", msg)
 

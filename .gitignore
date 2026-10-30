@@ -1,10 +1,16 @@
 attendance/
 model/enrollments.npz
+model/teacher_enrollments.npz
 model/subjects.json
 model/teachers.json
 __pycache__/
 *.pyc
 .venv/
+
+# Academic report / presentation deliverables - kept out of the repo.
+*.docx
+*.pptx
+*.pdf
 
 # Keep the ONNX models? They are large (~37 MB). Uncomment to ignore them:
 # model/*.onnx

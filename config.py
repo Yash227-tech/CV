@@ -20,6 +20,11 @@ SFACE_PATH = os.path.join(MODEL_DIR, "face_recognition_sface_2021dec.onnx")
 # Where enrolled students' face embeddings are stored.
 ENROLL_PATH = os.path.join(MODEL_DIR, "enrollments.npz")
 
+# Teachers' face embeddings (used to verify a teacher by face at lecture
+# check-in / close). Kept SEPARATE from students so teachers are never matched
+# as students during attendance.
+TEACHER_ENROLL_PATH = os.path.join(MODEL_DIR, "teacher_enrollments.npz")
+
 # Remembered subject names (so they appear in the GUI dropdown across sessions).
 SUBJECTS_PATH = os.path.join(MODEL_DIR, "subjects.json")
 
